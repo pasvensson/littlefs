@@ -1,0 +1,116 @@
+# Exhaustion scenario - write files until full, remove some files and then repeat
+[cases.test_exhaustion_repeat]
+defines.ERASE_COUNT = 4
+defines.PROG_SIZE = 32
+defines.READ_SIZE = 32
+defines.ERASE_SIZE = 32768
+defines.CACHE_SIZE = 1024
+defines.SEED = 1
+defines.LOCAL_DEBUG = 1
+code = '''
+void remove_files(lfs_t *lfs, int cycle, int i, int max_remove) {
+    char filename[1024];
+    int err;
+    lfs_file_t file;
+    int num_removed_files = 0;
+
+    for (int j = 0; j < 1000; j++) {
+        // Construct a filename
+        uint32_t prng = cycle * i * j + SEED;
+        int filenumber = (TEST_PRNG(&prng) % 1000) + 1;
+        sprintf(filename, "%016d", filenumber);
+
+        // Check if file exists
+        err = lfs_file_open(lfs, &file, filename, LFS_O_RDONLY); 
+        if (err != LFS_ERR_OK) {
+            if (LOCAL_DEBUG) {
+                //LFS_WARN("File %s does not exist, continuing", filename);
+            }
+            continue;
+        }
+        lfs_file_close(lfs, &file);
+
+        // The file exists so it can be removed
+        LFS_WARN("Try to remove %s", filename);
+        err = lfs_remove(lfs, filename);
+        if (err >= 0) {
+            LFS_WARN("Removed file: %s", filename);
+            num_removed_files++;
+        } else {
+            LFS_WARN("NOT removed: %s", filename);
+        }
+        LFS_WARN("Num removed files: %d", num_removed_files);
+        if (num_removed_files >= max_remove) {
+            break;
+        }
+    }
+}
+
+
+lfs_t lfs;
+lfs_format(&lfs, cfg) => 0;
+lfs_mount(&lfs, cfg) => 0;
+
+char filename[1024];
+int err;
+lfs_file_t file;
+char data_buf[101];
+struct lfs_fsinfo fsinfo;
+
+// Sanity check
+err = lfs_fs_stat(&lfs, &fsinfo);
+if (err == 0) {
+    LFS_WARN("disk_version: %u\n", fsinfo.disk_version);
+    LFS_WARN("block_size: %u\n", fsinfo.block_size);
+    LFS_WARN("block_count: %u\n", fsinfo.block_count);
+    LFS_WARN("name_max: %u\n", fsinfo.name_max);
+    LFS_WARN("file_max: %u\n", fsinfo.file_max);
+    LFS_WARN("attr_max: %u\n", fsinfo.attr_max);
+    
+    LFS_WARN("PROG_SIZE: %ld\n", PROG_SIZE);
+    LFS_WARN("READ_SIZE: %ld\n", READ_SIZE);
+    LFS_WARN("ERASE_SIZE: %ld\n", ERASE_SIZE);
+    LFS_WARN("CACHE_SIZE: %ld\n", CACHE_SIZE);
+}
+
+
+for (int cycle = 1; cycle <= 100; cycle++) { 
+    for (int i = 0; i < 1000; i++) {
+        // Construct a filename
+        sprintf(filename, "%016d", i+1);
+
+        // Create random length data
+        uint32_t prng = cycle * i + SEED;
+        size_t data_buf_len = (TEST_PRNG(&prng) % 100) + 1;
+        memset(data_buf, 0x42, data_buf_len);
+
+        // open file with flags LFS_O_RDWR | LFS_O_CREAT | LFS_O_TRUNC
+        err = lfs_file_open(&lfs, &file, filename, LFS_O_RDWR  | LFS_O_CREAT | LFS_O_TRUNC); 
+        if (err == LFS_ERR_NOSPC || err == LFS_ERR_NAMETOOLONG) {
+            // Filesystem full, during file_open, removing some files
+            LFS_WARN("Filesystem full removing files");
+            remove_files(&lfs, cycle, i, 10);
+            continue;
+        }
+
+        // write data to file
+        err = lfs_file_write(&lfs, &file, data_buf, data_buf_len);
+        if (err > 0) {
+            LFS_WARN("Wrote %3d bytes to file %s", err, filename);
+        } else if (err == LFS_ERR_NOSPC || err == LFS_ERR_NAMETOOLONG) {
+            LFS_WARN("file_write: NOSPC or NAMETOOLONG");
+            lfs_remove(&lfs, filename);
+            // Filesystem full, remove some files
+            LFS_WARN("Filesystem full, during file_write, removing some files");
+            remove_files(&lfs, cycle, i, 10);
+        }
+
+        // close file
+        lfs_file_close(&lfs, &file);
+    }
+}
+
+lfs_unmount(&lfs) => 0;
+
+
+'''
