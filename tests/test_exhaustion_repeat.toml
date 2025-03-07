@@ -97,6 +97,13 @@ for (int cycle = 1; cycle <= 100; cycle++) {
         err = lfs_file_write(&lfs, &file, data_buf, data_buf_len);
         if (err > 0) {
             LFS_WARN("Wrote %3d bytes to file %s", err, filename);
+            err = lfs_file_close(&lfs, &file);
+            if (err == LFS_ERR_NOSPC) {
+                LFS_WARN("file_close: NOSPC");
+                // Filesystem full, remove some files
+                LFS_WARN("Filesystem full, during file_close, removing some files");
+                remove_files(&lfs, cycle, i, 10);
+            }
         } else if (err == LFS_ERR_NOSPC || err == LFS_ERR_NAMETOOLONG) {
             LFS_WARN("file_write: NOSPC or NAMETOOLONG");
             lfs_remove(&lfs, filename);
@@ -106,7 +113,6 @@ for (int cycle = 1; cycle <= 100; cycle++) {
         }
 
         // close file
-        lfs_file_close(&lfs, &file);
     }
 }
 
