@@ -1,0 +1,188 @@
+# test running a filesystem to exhaustion with filenames in alphabetical order
+[cases.test_exhaustion_filenames_alphabetical_order]
+defines.PROG_SIZE = 32
+defines.READ_SIZE = 32
+defines.ERASE_SIZE = 32768
+defines.ERASE_COUNT = 4
+defines.CACHE_SIZE = 512
+defines.FILE_SIZE = [100]
+
+code = '''
+    lfs_t lfs;
+    int err;
+    uint32_t i = 1;
+    uint32_t num_files = 0;
+    struct lfs_fsinfo fsinfo;
+
+    // Initialize buffer once
+    uint8_t buffer[FILE_SIZE];
+    memset(buffer, 'A', sizeof(buffer));
+
+    // Format and mount the file system once
+    lfs_format(&lfs, cfg) => 0;
+    lfs_mount(&lfs, cfg) => 0;
+
+    while (true) {
+        char path[255];
+        snprintf(path, sizeof(path), "A%07d", i);
+        //LFS_WARN("Writing to filename: %s", path);
+        lfs_ssize_t size = FILE_SIZE;
+
+        lfs_file_t file;
+        err = lfs_file_open(&lfs, &file, path, LFS_O_WRONLY | LFS_O_CREAT | LFS_O_TRUNC);
+        if (err != 0) {
+            LFS_WARN("lfs_file_open err: %d\n", err);
+            break;
+        }
+
+        lfs_ssize_t res = lfs_file_write(&lfs, &file, buffer, size);
+        if (res == LFS_ERR_NOSPC) {
+            lfs_file_close(&lfs, &file);
+            break;
+        }
+
+        err = lfs_file_close(&lfs, &file);
+        if (err == LFS_ERR_NOSPC) {
+            break;
+        }
+
+        i++;  // next file
+    }
+
+    num_files = i - 1;
+    LFS_WARN("Number of files written: %d", num_files);
+
+    // Check file system statistics and file existence
+    for (uint32_t j = 1; j <= num_files; j++) {
+        char path[255];
+        snprintf(path, sizeof(path), "A%07d", j);
+        struct lfs_info info;
+        err = lfs_stat(&lfs, path, &info);
+        if (err == LFS_ERR_NOENT) {
+            LFS_ERROR("file %s NOT found", path);
+            break;
+        } else if (err != 0) {
+            LFS_WARN("err: %d   j: %d\n", err, j);
+            break;
+        } else {
+            //LFS_WARN("file %s found", path);
+        }
+    }
+
+    err = lfs_fs_stat(&lfs, &fsinfo);
+    if (err == 0) {
+        LFS_WARN("");
+        LFS_WARN("### Disk Info ###");
+        LFS_WARN("disk_version: %u", fsinfo.disk_version);
+        LFS_WARN("block_size: %u", fsinfo.block_size);
+        LFS_WARN("block_count: %u", fsinfo.block_count);
+        LFS_WARN("name_max: %u", fsinfo.name_max);
+        LFS_WARN("file_max: %u", fsinfo.file_max);
+        LFS_WARN("attr_max: %u", fsinfo.attr_max);
+        LFS_WARN("### Disk Info ###");
+        LFS_WARN("");
+    }
+
+    lfs_unmount(&lfs) => 0;
+
+    LFS_WARN("file size: %ld  number of files:%d\n", FILE_SIZE, num_files);
+'''
+
+
+# test running a filesystem to exhaustion with filenames in random order
+[cases.test_exhaustion_filenames_random_order]
+defines.PROG_SIZE = 32
+defines.READ_SIZE = 32
+defines.ERASE_SIZE = 32768
+defines.ERASE_COUNT = 4
+defines.CACHE_SIZE = 512
+defines.FILE_SIZE = [100]
+
+code = '''
+    void generate_random_path(char *path, uint32_t seed) {
+        uint32_t prng = seed;
+
+        snprintf(path, 255, "A%07d", (TEST_PRNG(&prng) % 10000000));
+    }
+
+    lfs_t lfs;
+    int err;
+    uint32_t i = 1;
+    uint32_t num_files = 0;
+    struct lfs_fsinfo fsinfo;
+
+    // Initialize buffer once
+    uint8_t buffer[FILE_SIZE];
+    memset(buffer, 'A', sizeof(buffer));
+
+    lfs_format(&lfs, cfg) => 0;
+    lfs_mount(&lfs, cfg) => 0;
+
+    while (true) {
+        // Generate random path
+        char path[1024];
+        generate_random_path(path, i);
+        //LFS_WARN("Writing to filename: %s", path);
+        
+        lfs_ssize_t size = FILE_SIZE;
+        lfs_file_t file;
+        err = lfs_file_open(&lfs, &file, path, LFS_O_WRONLY | LFS_O_CREAT | LFS_O_TRUNC);
+        if (err != 0) {
+            LFS_WARN("lfs_file_open err: %d  when opening %s", err, path);
+            break;
+        }
+
+        lfs_ssize_t res = lfs_file_write(&lfs, &file, buffer, size);
+        if (res == LFS_ERR_NOSPC) {
+            lfs_file_close(&lfs, &file);
+            break;
+        }
+
+        err = lfs_file_close(&lfs, &file);
+        if (err == LFS_ERR_NOSPC) {
+            break;
+        }
+
+        i++;  // next file
+    }
+
+    num_files = i - 1;
+    LFS_WARN("Number of files written: %d", num_files);
+
+    // should still be readable
+    for (uint32_t j = 1; j <= num_files; j++) {
+        char path[1024];
+        generate_random_path(path, j);
+
+        struct lfs_info info;
+        err = lfs_stat(&lfs, path, &info);
+        if (err == LFS_ERR_NOENT) {
+            LFS_ERROR("file %s NOT found", path);
+            break;
+        } else if (err != 0) {
+            LFS_WARN("err: %d   j: %d\n", err, j);
+            break;
+        } else {
+            //LFS_WARN("file %s found", path);
+        }
+    }
+
+    err = lfs_fs_stat(&lfs, &fsinfo);
+    if (err == 0) {
+        LFS_WARN("");
+        LFS_WARN("### Disk Info ###");
+        LFS_WARN("disk_version: %u", fsinfo.disk_version);
+        LFS_WARN("block_size: %u", fsinfo.block_size);
+        LFS_WARN("block_count: %u", fsinfo.block_count);
+        LFS_WARN("name_max: %u", fsinfo.name_max);
+        LFS_WARN("file_max: %u", fsinfo.file_max);
+        LFS_WARN("attr_max: %u", fsinfo.attr_max);
+        LFS_WARN("### Disk Info ###");
+        LFS_WARN("");
+    }
+
+    lfs_unmount(&lfs) => 0;
+
+    LFS_WARN("file size: %ld  number of files:%d\n", FILE_SIZE, num_files);
+
+'''
